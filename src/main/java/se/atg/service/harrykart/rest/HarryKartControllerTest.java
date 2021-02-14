@@ -5,16 +5,23 @@ import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.http.ResponseEntity;
+import se.atg.service.harrykart.exception.InvalidSpeed;
 import se.atg.service.harrykart.exception.NumberOfLoopsAndPowerUpsMismatchException;
 import se.atg.service.harrykart.model.HarryKart;
+import se.atg.service.harrykart.model.Participant;
 import se.atg.service.harrykart.model.Ranking;
+import se.atg.service.harrykart.model.RankingResponse;
 import se.atg.service.harrykart.services.HarryKartPlayService;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -23,13 +30,16 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class HarryKartControllerTest {
-
     XmlMapper mapper;
-    ObjectWriter ow = new ObjectMapper().writer().withDefaultPrettyPrinter();
+    ObjectWriter ow;
+    HarryKartPlayService harryKartPlay;
+
 
     @Before
     public void setUp() throws Exception {
         mapper = new XmlMapper();
+        ow = new ObjectMapper().writer().withDefaultPrettyPrinter();
+        harryKartPlay = new HarryKartPlayService();
     }
 
 
@@ -49,11 +59,10 @@ public class HarryKartControllerTest {
 
     @Test
     public void lanesFinishInOrderTest() throws IOException {
+        // given
         String inputXML = readFileToString("input_0.xml");
         HarryKart hk = mapper.readValue(inputXML, HarryKart.class);
-        // Calculate the race results
         List<Ranking> actualRanking = new HarryKartPlayService().play(hk).getBody().getRanking();
-        // Expected race outcome
         ArrayList<Ranking> expectedRanking = new ArrayList<>();
         expectedRanking.add(new Ranking(1, "TIMETOBELUCKY"));
         expectedRanking.add(new Ranking(2, "HERCULES BOKO"));
@@ -121,9 +130,14 @@ public class HarryKartControllerTest {
     public void invalidXmlFormatTest() throws NumberOfLoopsAndPowerUpsMismatchException, IOException {
         String inputXML = readFileToString("_InvalidHarryKartFormatTest.xml");
         HarryKart hk = mapper.readValue(inputXML, HarryKart.class);
-        int resultJsonStatusCode = new HarryKartPlayService().play(hk).getStatusCode().value();
+        ResponseEntity<RankingResponse> actualResult = new HarryKartPlayService().play(hk);
+        int resultJsonStatusCode = actualResult.getStatusCode().value();
         int expectedStatusCode = 400;
         assertEquals(resultJsonStatusCode, expectedStatusCode);
+
+        String actualErrorMessage = actualResult.getBody().getErrorMessage();
+        String expectedErrorMessage = "Invalid number of powerUps for loops. 7 loops must have 6 powerUps.";
+        assertEquals(actualErrorMessage, expectedErrorMessage);
     }
 
 
@@ -140,6 +154,49 @@ public class HarryKartControllerTest {
         String resultJson = ow.writeValueAsString(actualRanking);
         String expectedJson = ow.writeValueAsString(expectedRanking);
         assertEquals(resultJson, expectedJson);
+    }
+
+    @Test
+    public void calculateTimeForParticipantTest() throws IOException {
+
+        String inputXML = readFileToString("input_1.xml");
+        HarryKart harryKart = mapper.readValue(inputXML, HarryKart.class);
+
+        BigDecimal resultTime = harryKartPlay.calculateTimeForParticipant(new Participant(1, "TIMETOBELUCKY", 10), harryKart);
+        BigDecimal expectedTime = BigDecimal.valueOf(250.00000).setScale(5, RoundingMode.DOWN);
+
+        assertEquals(resultTime, expectedTime);
+    }
+
+
+    @Test(expected = InvalidSpeed.class)
+    public void calculateTimeForParticipantZeroSpeedExceptionTest() throws IOException {
+        String inputXML = readFileToString("input_1.xml");
+        HarryKart harryKart = mapper.readValue(inputXML, HarryKart.class);
+//        participant with 0 baseSpeed
+        Participant participant = new Participant(1, "TIMETOBELUCKY", 0);
+
+        harryKartPlay.calculateTimeForParticipant(participant, harryKart);
+
+    }
+
+
+    @Test
+    public void calculateTimeForLaneTest() {
+        ArrayList<Integer> powerUps = new ArrayList<>();
+        Collections.addAll(powerUps, 5, 10);
+        BigDecimal resultTime = harryKartPlay.calculateTimeForLane(3, 10, powerUps);
+        BigDecimal expectedTime = BigDecimal.valueOf(206.66666).setScale(5, RoundingMode.DOWN);
+        assertEquals(resultTime, expectedTime);
+    }
+
+
+    @Test(expected = InvalidSpeed.class)
+    public void calculateTimeForLaneInvalidSpeedTest() {
+        ArrayList<Integer> powerUps = new ArrayList<>();
+        Collections.addAll(powerUps, 5, -30);
+        harryKartPlay.calculateTimeForLane(3, 10, powerUps);
+
     }
 
 }
